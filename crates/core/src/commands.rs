@@ -9974,7 +9974,7 @@ fn stair(s: &mut Session, p: &Value) -> R {
             riser: dim("riser", RISER)?,
             tread: dim("tread", (tread * 1000.0).round() / 1000.0)?,
             landings: Vec::new(),
-            runs,
+            flights: runs,
             sketched,
         };
         let (n, each, length) = m.flight(&st);
@@ -9998,7 +9998,7 @@ fn stair(s: &mut Session, p: &Value) -> R {
         riser: dim("riser", RISER)?,
         tread: dim("tread", TREAD)?,
         landings: landings_param(c, p)?,
-        runs: Vec::new(),
+        flights: Vec::new(),
         sketched: Vec::new(),
     };
     let (n, _, length) = m.flight(&st);

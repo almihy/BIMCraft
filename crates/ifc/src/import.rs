@@ -3079,7 +3079,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             riser: climb / f64::from(risers),
             tread: (tread(&first) * 1000.0).round() / 1000.0,
             landings,
-            runs: Vec::new(),
+            flights: Vec::new(),
             sketched: Vec::new(),
         };
         let sid = m.insert(Element::Stair(stair));

@@ -157,7 +157,7 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
 pub const FORMAT: u32 = 32;
-/// [`FORMAT`], by what it brought: a stair by component (a stair's `runs`, `StairRun`, and its `sketched` landings) and a
+/// [`FORMAT`], by what it brought: a stair by component (a stair's `flights`, `StairRun`, and its `sketched` landings) and a
 /// wall opening's parameter values (`params`); a build that reads up to 31 would refuse them, not say "saved by a newer
 /// BIMCraft". A project with none of them is written as 31 or older ([`Model::written_format`]); nothing in a file of 31
 /// changes.
@@ -2528,11 +2528,11 @@ pub struct Stair {
     pub tread: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub landings: Vec<Landing>,
-    /// Revit's stair by component: its runs as drawn, each from the middle of its first riser to the middle of its last, in
+    /// Revit's stair by component: its runs as drawn (`flights`: `elements` gives `runs` as laid out, for every stair), each from the middle of its first riser to the middle of its last, in
     /// the order they climb, each of its own width and number of risers ([`StairRun`]). Then `start`, `angle` and `width`
     /// are the first run's, `landings` is empty, and its risers are the runs' together, the rise shared out evenly.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub runs: Vec<StairRun>,
+    pub flights: Vec<StairRun>,
     /// Its landings as Revit's sketched landings, with `runs`: each an outline in plan, at the top of the run before it (the
     /// first after the first run, and so on).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -5913,10 +5913,10 @@ impl Model {
         let (base, top) = self.span(st.level, 0.0, st.top_level, st.height);
         let rise = top - base;
         // Not a number, or less than one, is none.
-        if !st.runs.is_empty() {
-            let n = st.runs.iter().map(|r| r.risers).fold(0u32, u32::saturating_add);
+        if !st.flights.is_empty() {
+            let n = st.flights.iter().map(|r| r.risers).fold(0u32, u32::saturating_add);
             let each = if n > 0 { rise / f64::from(n) } else { 0.0 };
-            return (n, each, st.runs.iter().map(|r| r.start.dist(r.end)).sum());
+            return (n, each, st.flights.iter().map(|r| r.start.dist(r.end)).sum());
         }
         let n = (rise / st.riser - 1e-9).ceil().clamp(0.0, 1e6) as u32;
         let each = if n > 0 { rise / f64::from(n) } else { 0.0 };
@@ -9063,13 +9063,13 @@ impl Model {
                     return Err(format!("{who}: {n} risers; a stair takes 2 to 200, so check its height and its riser ({} mm)", st.riser));
                 }
                 landings(&who, &st.landings, Some(f64::from(n)))?;
-                if !st.runs.is_empty() && !st.landings.is_empty() {
+                if !st.flights.is_empty() && !st.landings.is_empty() {
                     return Err(format!("{who}: a stair by its runs has sketched landings, not `landings`"));
                 }
-                if st.runs.len() > 100 || st.sketched.len() >= st.runs.len().max(1) {
-                    return Err(format!("{who}: {} runs and {} landings: a landing goes between two runs", st.runs.len(), st.sketched.len()));
+                if st.flights.len() > 100 || st.sketched.len() >= st.flights.len().max(1) {
+                    return Err(format!("{who}: {} runs and {} landings: a landing goes between two runs", st.flights.len(), st.sketched.len()));
                 }
-                for (k, r) in st.runs.iter().enumerate() {
+                for (k, r) in st.flights.iter().enumerate() {
                     point(&format!("{who} run {k} start"), r.start)?;
                     point(&format!("{who} run {k} end"), r.end)?;
                     size(&format!("{who} run {k} width"), r.width)?;

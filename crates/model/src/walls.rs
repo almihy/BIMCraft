@@ -331,11 +331,11 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
                 arms.push(arm(m, other, o, true, false));
             }
         } else {
-            // A wall it ends on: the node within its thickness, between its ends. The node, or where its centre line ends:
-            // a wall put on another of its lines keeps the tee it had, as Revit's does.
+            // A wall it ends on: where its centre line ends within the other's thickness, between its ends (so a wall put on
+            // another of its lines keeps the tee it had and makes none, as Revit's does).
             let ax = Axis::of(o);
             let (ext, int) = faces(m, o);
-            let on = [node, centre_end(m, w, at_end)].into_iter().find_map(|q| {
+            let on = [centre_end(m, w, at_end)].into_iter().find_map(|q| {
                 let (s, across) = ax.project(q);
                 (s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(q, across) <= TOL)
                     .then_some(s)

@@ -3294,7 +3294,7 @@ impl BimApp {
                 riser: RISER,
                 tread: TREAD,
                 landings: Vec::new(),
-                runs: Vec::new(),
+                flights: Vec::new(),
                 sketched: Vec::new(),
             };
             let (n, _, _) = m.flight(&st);

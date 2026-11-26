@@ -109,10 +109,10 @@ fn ccw(ring: Vec<P2>) -> Vec<P2> {
 pub fn stair(m: &Model, st: &Stair) -> Layout {
     let (n, each, _) = m.flight(st);
     let base = m.elevation(st.level);
-    if !st.runs.is_empty() {
+    if !st.flights.is_empty() {
         let mut out = Layout { runs: Vec::new(), pads: Vec::new(), walk: Vec::new(), width: st.width };
         let mut up = 0u32;
-        for (k, r) in st.runs.iter().enumerate() {
+        for (k, r) in st.flights.iter().enumerate() {
             let z = (base + f64::from(up) * each, base + f64::from(up + r.risers) * each);
             up += r.risers;
             let u = if r.start.dist(r.end) > 1e-9 { (r.end - r.start).unit() } else { heading(st.angle) };

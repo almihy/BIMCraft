@@ -1746,7 +1746,7 @@ impl Model {
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
         // What a build that reads up to 31 refuses: a stair by component, a wall opening's parameter values.
         if self.elements.values().any(|e| match e {
-            Element::Stair(st) => !st.runs.is_empty() || !st.sketched.is_empty(),
+            Element::Stair(st) => !st.flights.is_empty() || !st.sketched.is_empty(),
             Element::WallOpening(o) => !o.params.is_empty(),
             _ => false,
         }) {

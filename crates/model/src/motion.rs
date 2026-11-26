@@ -100,13 +100,13 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             cp.mirrored ^= mo.mirror;
         }
         // A mirror image turns the other way at its landings.
-        Element::Stair(Stair { start, angle, landings, runs, sketched, .. }) => {
+        Element::Stair(Stair { start, angle, landings, flights, sketched, .. }) => {
             (*start, *angle) = turned(f, *start, *angle);
             if mo.mirror {
                 landings.iter_mut().for_each(|l| l.turn = -l.turn + 0.0);
             }
             // A stair by component: its runs and its landings' outlines taken as they are drawn.
-            for r in runs.iter_mut() {
+            for r in flights.iter_mut() {
                 (r.start, r.end) = (f(r.start), f(r.end));
             }
             for q in sketched.iter_mut().flatten() {
